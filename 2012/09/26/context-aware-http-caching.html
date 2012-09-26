@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Context-aware HTTP caching | asm89</title>
+    <link rel="stylesheet" href="../../../css/bootstrap.min.css">
+    <link rel="stylesheet" href="../../../css/main.css">
+</head>
+<body>
+
+<div class="container-fluid">
+        <nav>
+        <i class="icon-home"></i> <a href="../../..">home</a>
+    </nav>
+
+    <article>
+        <div class="date pull-right">
+            Sep 26th, 2012
+        </div>
+
+        <div class="body">
+            <h1>Context-aware HTTP caching</h1>
+            <!-- title: Context-aware caching of (restful) web applications with Varnish -->
+
+<p>A lot of web applications are a mix of personalized views, views for certain groups of users and views that are the same
+for all users of the application. Caching all of these views can be a challenge. Luckily reverse proxies like
+<a href="https://www.varnish-cache.org/">Varnish</a> are specialized in caching web applications, as long as your application talks
+HTTP the right way.</p>
+
+<p><a href="../../../p/varnish-caching/1-large.jpg"><img src="../../../p/varnish-caching/1_post.jpg" alt="Basic interaction between user and the web application." /></a></p>
+
+<h2>Basic HTTP caching</h2>
+
+<p>There are two important concepts involved in HTTP. The <em>request</em> which contains:</p>
+
+<ul>
+<li>the request type (<code>GET</code>/<code>HEAD</code>/<code>POST</code>/<code>PUT</code>/..)</li>
+<li>path (<code>/</code>, <code>/news</code>)</li>
+<li>several headers (<code>Accept</code>, <code>Host</code>, <code>User-Agent</code>)</li>
+<li>sometimes a request body</li>
+</ul>
+
+<p>Then there is the response containing headers and optionally a response body.  When requesting the frontpage of
+<a href="http://www.archlinux.org">archlinux.org</a> the request and response look like the following:</p>
+
+<pre><code>~ $ curl --verbose --head www.archlinux.org
+&gt; HEAD / HTTP/1.1
+&gt; User-Agent: curl/7.27.0
+&gt; Host: www.archlinux.org
+&gt; Accept: */*
+&gt;
+&lt; HTTP/1.1 200 OK
+&lt; Date: Sun, 12 Aug 2012 20:59:35 GMT
+&lt; Server: Apache
+&lt; Vary: Cookie,User-Agent,Accept-Encoding
+&lt; Cache-Control: max-age=300
+&lt; Content-Length: 23580
+&lt; Content-Type: text/html; charset=utf-8
+</code></pre>
+
+<p>Varnish is a caching reverse proxy which sits between the actual request of the user and the web application it is
+caching for. This basically means that every request from the user reaches the server as usual <code>(1)</code>, but instead of
+hitting the web application the initial request is handled by Varnish. Varnish will then either serve the response from
+memory if that's possible or it will proxy the request to the web application <code>(2)</code>.</p>
+
+<p><a href="../../../p/varnish-caching/2-large.jpg"><img src="../../../p/varnish-caching/2_post.jpg" alt="Adding a basic caching layer in the form of Varnish between the user and the actual application." /></a></p>
+
+<p>For a caching reverse proxy like Varnish there are two headers in the response of archlinux.org which are more
+interesting than the rest. First there is the <code>Cache-Control: max-age=300</code> header which tells Varnish that the response
+may be cached for 300 seconds. Next there is the <code>Vary: Cookie,User-Agent,Accept-Encoding</code> header. The value of this
+header tells Varnish that it can indeed cache the response, but it has to keep a different response in cache for each
+combination of values of the <code>Cookie</code>, <code>User-Agent</code> and <code>Accept-Encoding</code> headers of the request.</p>
+
+<h2>Adding more context</h2>
+
+<p>Using the <code>Vary</code> header a web application can instruct HTTP clients to keep different versions of a response based on
+properties of the request. For example <code>Vary: Cookie</code> will make sure a different response is kept for each value of the
+<code>Cookie</code> header of the request. This makes it possible to have different caches for anonymous users and a different
+cache for each user that is logged in and has its own cookie. However it would be nice to add more information to the
+request so we can cache on a more granular level.</p>
+
+<p>We can add more information to the request by adding another step in our request flow. Before the request from the user
+is passed to the application Varnish will try to authenticate the user of the request. With the user authenticated
+additional headers such as <code>X-User</code> and <code>X-Group</code> are added to the request. Having these extra headers allows the
+application to instruct the HTTP cache to <code>Vary</code> the cache on <code>X-User</code> level or on <code>X-Group</code> level. We can now create a
+cache that is shared between multiple users of the same group!</p>
+
+<h3>Pre-authenticating users</h3>
+
+<p>To authenticate a user and add extra context to the request on the actual web application an extra step is added in the
+request flow. The user will still send a request to the server as usual <code>(1)</code>, next Varnish will <em>first</em> make a request to a
+dedicated authentication endpoint in order to authenticate the request <code>(2)</code> and finally Varnish will do the actual
+request on the backend or retrieve the response from memory <code>(3)</code>.</p>
+
+<p><a href="../../../p/varnish-caching/3-large.jpg"><img src="../../../p/varnish-caching/3_post.jpg" alt="Pre-authenticating users before doing a request on the actual backend. Allowing for even better caching." /></a></p>
+
+<h3>Configuring Varnish</h3>
+
+<p>In the following example an "api" is assumed where a query parameter <code>?access_token=foo</code> is used for authentication.
+This example Varnish configuration makes use of <a href="https://github.com/varnish/libvmod-curl">libvmod-curl</a> which adds curl
+bindings to the configuration language of Varnish. [1] Of course the curl part of the example could be swapped for other
+implementations calling some other service such as <a href="https://github.com/zephirworks/libvmod-redis">redis</a>.</p>
+
+<pre><code># The routine handling received requests
+sub vcl_recv {
+
+  # At first entry, authenticate
+  if (req.restarts == 0 &amp;&amp; req.url !~ "/token.php") {
+
+    # Url should contain "access_token"
+    if (req.url !~ "access_token") {
+        error 401 "Not authorized";
+    }
+
+    # extract the access token and call a specialized script to authenticate the token
+    curl.fetch("http://localhost/token.php?token=" + regsub(req.url, "(.*)access_token=([^&amp;]+)(.*)", "\2"));
+
+    # check the status code of the response
+    if (curl.status() != 200) {
+        error 401 "Not authorized";
+    }
+
+    # Add additional headers to the original request
+    set req.http.X-Auth-User  = curl.header("X-Auth-User");
+    set req.http.X-Auth-Scope = curl.header("X-Auth-Scope");
+    set req.http.X-Auth-Group = curl.header("X-Auth-Group");
+
+    curl.free();
+
+    # Remove the access token from the original url
+    set req.url = regsub(req.url, "(.*)access_token=([^&amp;]+)(.*)", "\1\3");
+  }
+}
+</code></pre>
+
+<p>Using two basic PHP scripts as ''web application'' I will try to show how this will work in practice. First there is
+<code>token.php</code> which is responsible for authenticating a given token:</p>
+
+<pre><code>&lt;?php
+header('Cache-Control: no-cache,private');
+
+// Get "user,group" from the token parameter
+list($user, $group) = explode(',', $_GET['token']);
+
+// Add "context" headers as much as you like
+header('X-Auth-User: ' . $user);
+header('X-Auth-Group: ' . $group);
+</code></pre>
+
+<p>Next there is <code>index.php</code> which will return different output and vary headers based on the given query parameters. The
+output from the script is prefixed with the unix timestamp in microseconds.</p>
+
+<pre><code>&lt;?php
+header('Cache-Control: max-age=10s');
+if (isset($_GET['shared'])) {
+    header('Vary: X-Auth-Group');
+    out("Shared response for " . $_SERVER['HTTP_X_AUTH_GROUP'] . "!");
+} else if (isset($_GET['nocache'])) {
+    header('Cache-Control: no-cache');
+    out("Never cached!");
+} else if (count($_POST) &gt; 0) {
+    out("Hi " . $_SERVER['HTTP_X_AUTH_USER'] . ", this was a POST request!");
+} else {
+    header('Vary: X-Auth-User');
+    out("Hi " . $_SERVER['HTTP_X_AUTH_USER'] . "!");
+}
+
+function out($line)
+{
+    echo sprintf("[%s] %s\n", microtime(true), $line);
+}
+</code></pre>
+
+<p>With Varnish configured to cache the responses from the scripts using the pre-authentication method described above,
+responses from <code>index.php</code> will look like the following:</p>
+
+<pre><code># Requesting user specific content
+~ $ curl localhost/?access_token=a,1
+[1348606150.7984] Hi a!
+~ $ curl localhost/?access_token=a,1
+[1348606150.7984] Hi a!
+~ $ curl localhost/?access_token=b,1
+[1348606152.8321] Hi b!
+~ $ curl localhost/?access_token=b,1
+[1348606152.8321] Hi b!
+~ $ curl localhost/?access_token=c,2
+[1348606154.8652] Hi c!
+~ $ curl localhost/?access_token=d,2
+[1348606155.8784] Hi d!
+</code></pre>
+
+<p>As one can see, the response is cached and resend, but a different response is send for each user.</p>
+
+<pre><code>~ $ curl localhost/?access_token=a,1&amp;shared
+[1348606026.4899] Shared response for 1!
+~ $ curl localhost/?access_token=b,1&amp;shared
+[1348606026.4899] Shared response for 1!
+~ $ curl localhost/?access_token=c,2&amp;shared
+[1348606030.5253] Shared response for 2!
+~ $ curl localhost/?access_token=d,2&amp;shared
+[1348606030.5253] Shared response for 2!
+~ $ curl localhost/?access_token=b,1&amp;shared
+[1348606034.5583] Shared response for 1!
+</code></pre>
+
+<p>This time, the response for the users <code>a</code> and <code>b</code> are the same because they're both part of group 1. Again the responses
+are served from cache, but this time they differ based on the group of the user.</p>
+
+<pre><code>~ $ curl -d "foo=bar" "localhost/?access_token=a,1"
+[1348606314.1293] Hi a, this was a POST request!
+~ $ curl -d "foo=bar" "localhost/?access_token=a,1"
+[1348606314.746] Hi a, this was a POST request!
+</code></pre>
+
+<p>Post requests issued to the server are authenticated. The response of the web application however is not cached.</p>
+
+<pre><code>~ $ curl localhost/?access_token=a,1&amp;nocache
+[1348606204.3077] Never cached!
+~ $ curl localhost/?access_token=a,1&amp;nocache
+[1348606205.3246] Never cached!
+</code></pre>
+
+<p>For completeness sake there is also an example of a response that is never cached by Varnish.</p>
+
+<h2>Summary</h2>
+
+<ul>
+<li>Various ways of handling HTTP caching in your application</li>
+<li>Authenticating users <em>before</em> hitting the actual web application opens new possibilities for HTTP caching</li>
+</ul>
+
+<p>Having the authentication part of the application separated also opens new possibilities such as caching 
+authenticating requests or rate limiting users.</p>
+
+
+            <a href="https://twitter.com/iam_asm89"><i class="icon-comment"></i></a>
+            <a href="https://github.com/asm89"><i class="icon-wrench"></i></a>
+        </div>
+    </article>
+
+</div>
+
+  <script>
+    var _gaq=[['_setAccount','UA-34072055-1'],['_trackPageview']];
+    (function(d,t){var g=d.createElement(t),s=d.getElementsByTagName(t)[0];
+    g.src=('https:'==location.protocol?'//ssl':'//www')+'.google-analytics.com/ga.js';
+    s.parentNode.insertBefore(g,s)}(document,'script'));
+  </script>
+</body>
+</html>
