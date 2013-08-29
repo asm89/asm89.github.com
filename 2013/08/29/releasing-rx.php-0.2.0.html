@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Releasing Rx.PHP 0.2.0! | asm89</title>
+    <link rel="stylesheet" href="../../../css/bootstrap.min.css">
+    <link rel="stylesheet" href="../../../css/main.css">
+</head>
+<body>
+
+<div class="container-fluid">
+        <nav>
+        <i class="icon-home"></i> <a href="../../..">home</a>
+    </nav>
+
+    <article>
+        <div class="date pull-right">
+            Aug 29th, 2013
+        </div>
+
+        <div class="body">
+            <h1>Releasing Rx.PHP 0.2.0!</h1>
+            <p>I'm happy to announce the 0.2.0 release of <a href="https://github.com/asm89/Rx.PHP">Rx.PHP</a>. This release focussed on
+stabilizing the core features of the library. It adds the <code>skip</code> operator,
+several helpers to functionally test your reactive code and all new and
+previous core functionality is now <a href="https://travis-ci.org/asm89/Rx.PHP">tested</a>.</p>
+
+<h2>Skip operator</h2>
+
+<p>The <code>skip</code> operator was added to skip a specified amount of messages when
+observing a sequence:</p>
+
+<pre><code>$observable = new ArrayObservable(array(1, 1, 2, 3, 5, 8, 13));
+$skipsThree = $observable-&gt;skip(3);
+
+$observable-&gt;subscribeCallback(function($elem) { echo 'y' .$elem . ' '; });
+// outputs: x1 x1 x2 x3 x5 x8 x13
+
+$skipsThree-&gt;subscribeCallback(function($elem) { echo 'y' .$elem . ' '; });
+// outputs: y3 y5 y8 y13
+</code></pre>
+
+<h2>Testing helpers</h2>
+
+<p>At its core Rx is about observing sequences of events. In order to test a
+program it is useful to be in control of an event stream. To help with
+simulating a specific series of events the library now supports a
+<code>VirtualTimeScheduler</code> and an extending <code>TestScheduler</code> to be in control of
+"time" in your test. Next are the <code>ColdObservable</code> and <code>HotObservable</code> objects
+that allow you to build test streams to run through your code while keeping
+track of when observers subscribe and unsubscribe. There are new objects
+representing one of the <code>onCompleted</code>, <code>onError</code> and <code>onNext</code> notifications.
+Finally there is a <code>MockObserver</code> that records emitted events.</p>
+
+<h3>VirtualTimeScheduler and TestScheduler</h3>
+
+<p>Events happen over time. Testing against events in "real" time would be quite
+cumbersome. Instead Rx introduces the concept of virtual time to be used in
+testing. The VirtualTimeScheduler keeps an internal clock that ticks after all
+the work for the current tick is done. In the world of virtual time, the
+scheduled work is assumed to take zero time. This makes it possible to assert on
+the scheduling of events.</p>
+
+<h3>ColdObservable</h3>
+
+<p>A <code>ColdObservable</code> represents a series of notifications that start to "stream"
+as soon as you subscribe to it.</p>
+
+<pre><code>$xs = $this-&gt;createColdObservable(array(
+    onNext(150, "foo"),
+    onNext(250, "Bar"),
+    onCompleted(350)
+));
+
+// will subscribe at timepoint 200 by default
+$results = $this-&gt;scheduler-&gt;startWithCreate(function() use ($xs) {
+    return $xs;
+});
+
+$this-&gt;assertCount(3, $results-&gt;getMessages());
+$this-&gt;assertMessages(array(
+    onNext(350, "foo"),
+    onNext(450, "Bar"),
+    onCompleted(550)
+), $results-&gt;getMessages());
+
+// subscribed at time 200 and unsubscribed at 550
+$this-&gt;assertSubscriptions(array(subscribe(200, 550)), $xs-&gt;getSubscriptions());
+</code></pre>
+
+<h3>HotObservable</h3>
+
+<p>A <code>HotObservable</code> represents a series of notifications that start to stream as
+soon as the observable is created. That means that if you define it to contain
+an <code>onNext()</code> notification at timepoint 150, the notification will be scheduled
+at absolute time 150. Not relative to the times the observers subscribe to it:</p>
+
+<pre><code>$xs = $this-&gt;createHotObservable(array(
+    onNext(150, "foo"),
+    onNext(250, "Bar"),
+    onCompleted(350)
+));
+
+// will subscribe at timepoint 200 by default
+$results = $this-&gt;scheduler-&gt;startWithCreate(function() use ($xs) {
+    return $xs;
+});
+
+$this-&gt;assertCount(2, $results-&gt;getMessages());
+$this-&gt;assertMessages(array(
+    onNext(250, "Bar"),
+    onCompleted(350)
+), $results-&gt;getMessages());
+
+$this-&gt;assertSubscriptions(array(subscribe(200, 350)), $xs-&gt;getSubscriptions());
+</code></pre>
+
+<h3>onCompleted, onNext and onCompleted</h3>
+
+<p>As can be seen above, the library ships with helper functions to create a
+representation of the three possible notifications to an observer.</p>
+
+<pre><code>onCompleted()
+// translates to
+new Recorded(250, new OnCompletedNotification());
+
+onError(new SomeException('bar'))
+new Recorded(250, new OnErrorNotification($error));
+
+onNext(250, 'foo');
+new Recorded(250, new OnNextNotification('foo'));
+</code></pre>
+
+<h3>MockObserver</h3>
+
+<p>In the previous examples the <code>MockObserver</code> is not used directly. Instead the
+<code>TestScheduler</code> returns a <code>MockObserver</code> when using the scheduler's helper
+methods to subscribe to a stream:</p>
+
+<pre><code>/** @var Rx\Testing\MockObserver */
+$results = $this-&gt;scheduler-&gt;startWithCreate(function() use ($xs) {
+    return $xs;
+});
+</code></pre>
+
+<p>The observer records all calls to it's <code>onCompleted</code>, <code>onError</code> and <code>onNext</code>
+methods and exposes the recorded messages through <code>MockObserver#getMessages()</code>.</p>
+
+<h2>What's next?</h2>
+
+<p>The next version of Rx.PHP will focus on documentation and creating more
+observables (0mq, sockets, async redis, http?, ...).</p>
+
+<p>Want to know more about what Rx is all about? Checkout the talk <a href="http://www.infoq.com/presentations/Rx-Curing-Your-Asynchronous-Programming-Blues">Rx: Curing
+Your Asynchronous Programming Blues</a>, read the <a href="http://www.introtorx.com/">Introduction to
+Rx</a> book or checkout a small <a href="https://github.com/asm89/rxphp-chat">demo application</a> that shows the
+capabilities of the library.</p>
+
+<p>Not into PHP, but interested?  Checkout one of the libraries in the language of
+your choice:</p>
+
+<ul>
+<li><a href="http://msdn.microsoft.com/en-us/data/gg577609.aspx">.NET</a></li>
+<li><a href="https://github.com/Reactive-Extensions/RxJS">RxJS</a></li>
+<li><a href="https://github.com/Netflix/RxJava">RxJava</a></li>
+<li><a href="https://github.com/ReactiveCocoa/ReactiveCocoa">Reactive Cocoa</a></li>
+</ul>
+
+
+            <a href="https://twitter.com/iam_asm89"><i class="icon-comment"></i></a>
+            <a href="https://github.com/asm89"><i class="icon-wrench"></i></a>
+        </div>
+    </article>
+
+</div>
+
+  <script>
+    var _gaq=[['_setAccount','UA-34072055-1'],['_trackPageview']];
+    (function(d,t){var g=d.createElement(t),s=d.getElementsByTagName(t)[0];
+    g.src=('https:'==location.protocol?'//ssl':'//www')+'.google-analytics.com/ga.js';
+    s.parentNode.insertBefore(g,s)}(document,'script'));
+  </script>
+
+  <script src="http://code.jquery.com/jquery-latest.min.js"></script>
+  <script src ="/js/blogpost-tweets.js" type="text/javascript"></script>
+  <script src="http://platform.twitter.com/widgets.js"></script>
+</body>
+</html>
