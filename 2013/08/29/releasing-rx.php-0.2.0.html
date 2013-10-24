@@ -2,15 +2,25 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Releasing Rx.PHP 0.2.0! | asm89</title>
-    <link rel="stylesheet" href="../../../css/bootstrap.min.css">
-    <link rel="stylesheet" href="../../../css/main.css">
+    <title>Releasing Rx.PHP 0.2.0! &mdash; asm89</title>
+    <link href="/components/bootstrap/css/bootstrap.min.css" rel="stylesheet" type="text/css" />
+    <link href="/components/bootstrap/css/bootstrap-responsive.min.css" rel="stylesheet" type="text/css" />
+    <link href="/css/main.css" rel="stylesheet" type="text/css" />
+    <!-- HTML5 shim, for IE6-8 support of HTML5 elements -->
+    <!--[if lt IE 9]>
+        <script src="http://html5shim.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link rel="stylesheet" href="/components/highlightjs/styles/github.css" />
+    <style>
+    /** quick fix because bootstrap <pre> has a background-color. */
+    pre code { background-color: inherit; }
+    </style>
 </head>
 <body>
 
 <div class="container-fluid">
         <nav>
-        <i class="icon-home"></i> <a href="../../..">home</a>
+        <i class="icon-home"></i> <a href="/">home</a>
     </nav>
 
     <article>
@@ -30,7 +40,7 @@ previous core functionality is now <a href="https://travis-ci.org/asm89/Rx.PHP">
 <p>The <code>skip</code> operator was added to skip a specified amount of messages when
 observing a sequence:</p>
 
-<pre><code>$observable = new ArrayObservable(array(1, 1, 2, 3, 5, 8, 13));
+<pre><code class="php">$observable = new ArrayObservable(array(1, 1, 2, 3, 5, 8, 13));
 $skipsThree = $observable-&gt;skip(3);
 
 $observable-&gt;subscribeCallback(function($elem) { echo 'x' . $elem . ' '; });
@@ -66,7 +76,7 @@ the scheduling of events.</p>
 <p>A <code>ColdObservable</code> represents a series of notifications that start to "stream"
 as soon as you subscribe to it.</p>
 
-<pre><code>$xs = $this-&gt;createColdObservable(array(
+<pre><code class="php">$xs = $this-&gt;createColdObservable(array(
     onNext(150, "foo"),
     onNext(250, "Bar"),
     onCompleted(350)
@@ -120,7 +130,7 @@ $this-&gt;assertSubscriptions(array(subscribe(200, 350)), $xs-&gt;getSubscriptio
 <p>As can be seen above, the library ships with helper functions to create a
 representation of the three possible notifications to an observer.</p>
 
-<pre><code>onCompleted()
+<pre><code class="php">onCompleted()
 // translates to
 new Recorded(250, new OnCompletedNotification());
 
@@ -137,7 +147,7 @@ new Recorded(250, new OnNextNotification('foo'));
 <code>TestScheduler</code> returns a <code>MockObserver</code> when using the scheduler's helper
 methods to subscribe to a stream:</p>
 
-<pre><code>/** @var Rx\Testing\MockObserver */
+<pre><code class="php">/** @var Rx\Testing\MockObserver */
 $results = $this-&gt;scheduler-&gt;startWithCreate(function() use ($xs) {
     return $xs;
 });
@@ -176,7 +186,7 @@ your choice:</p>
         </div>
     </article>
 
-</div>
+    </div>
 
   <script>
     var _gaq=[['_setAccount','UA-34072055-1'],['_trackPageview']];
@@ -185,8 +195,11 @@ your choice:</p>
     s.parentNode.insertBefore(g,s)}(document,'script'));
   </script>
 
-  <script src="http://code.jquery.com/jquery-latest.min.js"></script>
+  <script src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+  <script>window.jQuery || document.write('<script src="/components/jquery/jquery.min.js"><\/script>')</script>
   <script src ="/js/blogpost-tweets.js" type="text/javascript"></script>
+  <script src="/components/highlightjs/highlight.pack.js"></script>
+  <script>hljs.initHighlightingOnLoad();</script>
   <script src="http://platform.twitter.com/widgets.js"></script>
 </body>
 </html>

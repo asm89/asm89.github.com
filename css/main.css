@@ -64,6 +64,9 @@ article .body {
     font-family: georgia, times, serif;
 }
 */
+h1 {
+    font-size: 36px;
+}
 
 article h1 {
     margin: 20px 0;
