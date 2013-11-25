@@ -93,3 +93,10 @@ article p {
 .twitter-tweet.twitter-tweet-rendered {
     width: 100%;
 }
+
+.page-quote blockquote p {
+    margin-bottom: 10px;
+    font-size: 14px;
+    font-weight: normal;
+    line-height: 20px;
+}
